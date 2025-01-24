@@ -63,3 +63,31 @@ def test_triangle_ray_intersects(triangle_ray_intersects):
         expected = solutions.triangle_ray_intersects(A, B, C, O, D)
         assert actual == expected
     print("All tests in `test_triangle_ray_intersects` passed!")
+
+
+def test_rotation_matrix(rotation_matrix):
+    id = rotation_matrix(t.tensor(0.0))
+    id_expected = t.eye(3)
+    t.testing.assert_close(id, id_expected)
+
+    ninety = rotation_matrix(t.tensor(t.pi / 2))
+    ninety_expected = t.tensor(
+        [
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+        ]
+    )
+    t.testing.assert_close(ninety, ninety_expected)
+
+    rotated = rotation_matrix(theta := t.tensor(0.1))
+    rotated_expected = t.tensor(
+        [
+            [t.cos(theta), 0.0, t.sin(theta)],
+            [0.0, 1.0, 0.0],
+            [-t.sin(theta), 0.0, t.cos(theta)],
+        ]
+    )
+    t.testing.assert_close(rotated, rotated_expected)
+
+    print("All tests in `test_rotation_matrix` passed!")
