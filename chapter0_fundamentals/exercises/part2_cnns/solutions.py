@@ -279,7 +279,7 @@ def train(args: SimpleMLPTrainingArgs) -> tuple[list[float], SimpleMLP]:
 
             # Update logs & progress bar
             loss_list.append(loss.item())
-            pbar.set_postfix(epoch=f"{epoch + 1}/{epochs}", loss=f"{loss:.3f}")
+            pbar.set_postfix(epoch=f"{epoch + 1}/{args.epochs}", loss=f"{loss:.3f}")
 
     return loss_list, model
 
@@ -331,7 +331,7 @@ def train(args: SimpleMLPTrainingArgs) -> tuple[list[float], list[float], Simple
 
             # Update logs & progress bar
             loss_list.append(loss.item())
-            pbar.set_postfix(epoch=f"{epoch + 1}/{epochs}", loss=f"{loss:.3f}")
+            pbar.set_postfix(epoch=f"{epoch + 1}/{args.epochs}", loss=f"{loss:.3f}")
 
         # Validation loop
         num_correct_classifications = 0
@@ -614,15 +614,15 @@ class ResNet34(nn.Module):
         n_classes=1000,
     ):
         super().__init__()
-        in_feats0 = 64
+        out_feats0 = 64
         self.n_blocks_per_group = n_blocks_per_group
         self.out_features_per_group = out_features_per_group
         self.first_strides_per_group = first_strides_per_group
         self.n_classes = n_classes
 
         self.in_layers = Sequential(
-            Conv2d(3, in_feats0, kernel_size=7, stride=2, padding=3),
-            BatchNorm2d(in_feats0),
+            Conv2d(3, out_feats0, kernel_size=7, stride=2, padding=3),
+            BatchNorm2d(out_feats0),
             ReLU(),
             MaxPool2d(kernel_size=3, stride=2, padding=1),
         )
@@ -913,7 +913,7 @@ def train(args: ResNetTrainingArgs) -> tuple[list[float], list[float], ResNet34]
 
             # Update logs & progress bar
             loss_list.append(loss.item())
-            pbar.set_postfix(epoch=f"{epoch + 1}/{epochs}", loss=f"{loss:.3f}")
+            pbar.set_postfix(epoch=f"{epoch + 1}/{args.epochs}", loss=f"{loss:.3f}")
 
         # Validation loop
         model.eval()
@@ -1094,9 +1094,10 @@ def as_strided_mm(matA: Float[Tensor, "i j"], matB: Float[Tensor, "j k"]) -> Flo
     """
     assert len(matA.shape) == 2, f"mat1 should be 2D, not {len(matA.shape)}"
     assert len(matB.shape) == 2, f"mat2 should be 2D, not {len(matB.shape)}"
-    assert matA.shape[1] == matB.shape[0], (
-        f"mat1{list(matA.shape)}, mat2{list(matB.shape)} not compatible for multiplication"
-    )
+    assert (
+        matA.shape[1] == matB.shape[0]
+    ), f"mat1{list(matA.shape)}, mat2{list(matB.shape)} not compatible for multiplication"
+
 
     # Get the matrix strides, and matrix dims
     sA0, sA1 = matA.stride()
@@ -1309,6 +1310,84 @@ if MAIN:
             print(f"{v!r:9} -> {force_pair(v)!r}")
         except ValueError:
             print(f"{v!r:9} -> ValueError")
+
+# %%
+
+
+def conv2d(
+    x: Float[Tensor, "batch in_channels height width"],
+    weights: Float[Tensor, "out_channels in_channels kernel_height kernel_width"],
+    stride: IntOrPair = 1,
+    padding: IntOrPair = 0,
+) -> Float[Tensor, "batch out_channels height width"]:
+    """
+    Like torch's conv2d using bias=False.
+    """
+    stride_h, stride_w = force_pair(stride)
+    padding_h, padding_w = force_pair(padding)
+
+    x_padded = pad2d(x, left=padding_w, right=padding_w, top=padding_h, bottom=padding_h, pad_value=0)
+
+    b, ic, h, w = x_padded.shape
+    oc, ic2, kh, kw = weights.shape
+    assert ic == ic2, "in_channels for x and weights don't match up"
+    ow = 1 + (w - kw) // stride_w
+    oh = 1 + (h - kh) // stride_h
+
+    s_b, s_ic, s_h, s_w = x_padded.stride()
+
+    # Get strided x (new height/width dims have same stride as original height/width-strides of x, scaled by stride)
+    x_new_shape = (b, ic, oh, ow, kh, kw)
+    x_new_stride = (s_b, s_ic, s_h * stride_h, s_w * stride_w, s_h, s_w)
+    x_strided = x_padded.as_strided(size=x_new_shape, stride=x_new_stride)
+
+    return einops.einsum(x_strided, weights, "b ic oh ow kh kw, oc ic kh kw -> b oc oh ow")
+
+
+if MAIN:
+    tests.test_conv2d(conv2d)
+
+# %%
+
+
+def maxpool2d(
+    x: Float[Tensor, "batch in_channels height width"],
+    kernel_size: IntOrPair,
+    stride: IntOrPair | None = None,
+    padding: IntOrPair = 0,
+) -> Float[Tensor, "batch out_channels height width"]:
+    """
+    Like PyTorch's maxpool2d. If stride is None, should be equal to kernel size.
+    """
+    # Set actual values for stride and padding, using force_pair function
+    if stride is None:
+        stride = kernel_size
+    stride_h, stride_w = force_pair(stride)
+    padding_h, padding_w = force_pair(padding)
+    kh, kw = force_pair(kernel_size)
+
+    # Get padded version of x
+    x_padded = pad2d(x, left=padding_w, right=padding_w, top=padding_h, bottom=padding_h, pad_value=-t.inf)
+
+    # Calculate output height and width for x
+    b, ic, h, w = x_padded.shape
+    ow = 1 + (w - kw) // stride_w
+    oh = 1 + (h - kh) // stride_h
+
+    # Get strided x
+    s_b, s_c, s_h, s_w = x_padded.stride()
+
+    x_new_shape = (b, ic, oh, ow, kh, kw)
+    x_new_stride = (s_b, s_c, s_h * stride_h, s_w * stride_w, s_h, s_w)
+    x_strided = x_padded.as_strided(size=x_new_shape, stride=x_new_stride)
+
+    # Argmax over dimensions of the maxpool kernel
+    # (note these are the same dims that we multiply over in 2D convolutions)
+    return x_strided.amax(dim=(-1, -2))
+
+
+if MAIN:
+    tests.test_maxpool2d(maxpool2d)
 
 # %%
 

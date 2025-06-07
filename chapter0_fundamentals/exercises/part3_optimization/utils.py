@@ -188,3 +188,4 @@ def plot_fn_with_points(
         return fig
     else:
         fig.show(config=CONFIG)
+
