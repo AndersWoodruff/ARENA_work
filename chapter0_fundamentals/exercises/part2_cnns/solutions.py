@@ -1098,6 +1098,7 @@ def as_strided_mm(matA: Float[Tensor, "i j"], matB: Float[Tensor, "j k"]) -> Flo
         matA.shape[1] == matB.shape[0]
     ), f"mat1{list(matA.shape)}, mat2{list(matB.shape)} not compatible for multiplication"
 
+
     # Get the matrix strides, and matrix dims
     sA0, sA1 = matA.stride()
     dA0, dA1 = matA.shape
@@ -1309,6 +1310,84 @@ if MAIN:
             print(f"{v!r:9} -> {force_pair(v)!r}")
         except ValueError:
             print(f"{v!r:9} -> ValueError")
+
+# %%
+
+
+def conv2d(
+    x: Float[Tensor, "batch in_channels height width"],
+    weights: Float[Tensor, "out_channels in_channels kernel_height kernel_width"],
+    stride: IntOrPair = 1,
+    padding: IntOrPair = 0,
+) -> Float[Tensor, "batch out_channels height width"]:
+    """
+    Like torch's conv2d using bias=False.
+    """
+    stride_h, stride_w = force_pair(stride)
+    padding_h, padding_w = force_pair(padding)
+
+    x_padded = pad2d(x, left=padding_w, right=padding_w, top=padding_h, bottom=padding_h, pad_value=0)
+
+    b, ic, h, w = x_padded.shape
+    oc, ic2, kh, kw = weights.shape
+    assert ic == ic2, "in_channels for x and weights don't match up"
+    ow = 1 + (w - kw) // stride_w
+    oh = 1 + (h - kh) // stride_h
+
+    s_b, s_ic, s_h, s_w = x_padded.stride()
+
+    # Get strided x (new height/width dims have same stride as original height/width-strides of x, scaled by stride)
+    x_new_shape = (b, ic, oh, ow, kh, kw)
+    x_new_stride = (s_b, s_ic, s_h * stride_h, s_w * stride_w, s_h, s_w)
+    x_strided = x_padded.as_strided(size=x_new_shape, stride=x_new_stride)
+
+    return einops.einsum(x_strided, weights, "b ic oh ow kh kw, oc ic kh kw -> b oc oh ow")
+
+
+if MAIN:
+    tests.test_conv2d(conv2d)
+
+# %%
+
+
+def maxpool2d(
+    x: Float[Tensor, "batch in_channels height width"],
+    kernel_size: IntOrPair,
+    stride: IntOrPair | None = None,
+    padding: IntOrPair = 0,
+) -> Float[Tensor, "batch out_channels height width"]:
+    """
+    Like PyTorch's maxpool2d. If stride is None, should be equal to kernel size.
+    """
+    # Set actual values for stride and padding, using force_pair function
+    if stride is None:
+        stride = kernel_size
+    stride_h, stride_w = force_pair(stride)
+    padding_h, padding_w = force_pair(padding)
+    kh, kw = force_pair(kernel_size)
+
+    # Get padded version of x
+    x_padded = pad2d(x, left=padding_w, right=padding_w, top=padding_h, bottom=padding_h, pad_value=-t.inf)
+
+    # Calculate output height and width for x
+    b, ic, h, w = x_padded.shape
+    ow = 1 + (w - kw) // stride_w
+    oh = 1 + (h - kh) // stride_h
+
+    # Get strided x
+    s_b, s_c, s_h, s_w = x_padded.stride()
+
+    x_new_shape = (b, ic, oh, ow, kh, kw)
+    x_new_stride = (s_b, s_c, s_h * stride_h, s_w * stride_w, s_h, s_w)
+    x_strided = x_padded.as_strided(size=x_new_shape, stride=x_new_stride)
+
+    # Argmax over dimensions of the maxpool kernel
+    # (note these are the same dims that we multiply over in 2D convolutions)
+    return x_strided.amax(dim=(-1, -2))
+
+
+if MAIN:
+    tests.test_maxpool2d(maxpool2d)
 
 # %%
 

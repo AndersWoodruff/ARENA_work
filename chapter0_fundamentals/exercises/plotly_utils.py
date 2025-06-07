@@ -268,3 +268,4 @@ def plot_train_loss_and_test_accuracy_from_metrics(metrics: pd.DataFrame, title:
 #         yaxis_range=[0, 0.1 + max(y[0])],
 #         # yaxis2_range=[0, 1],
 #     )
+
