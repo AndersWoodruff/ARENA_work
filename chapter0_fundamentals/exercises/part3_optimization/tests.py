@@ -675,8 +675,8 @@ def run_reduce(rank: int, world_size: int, reduce):
     dist.destroy_process_group()
 
 
-def test_reduce(reduce):
-    world_size = 3  # Number of processes (simulated ranks)
+def test_reduce(reduce, WORLD_SIZE):
+    world_size = WORLD_SIZE  # Number of processes (simulated ranks)
     print("Running reduce on dst=0, with initial tensors: [0, 0], [1, 2], [10, 20]")
     mp.spawn(run_reduce, args=(world_size, reduce), nprocs=world_size, join=True)
     print("All tests in `test_reduce` passed!\n")
